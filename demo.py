@@ -64,20 +64,20 @@ def main():
         import socket
         
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        server_socket.bind(('', 11111))
+        server_socket.bind(('10.181.159.22', 11111))
         
         headset.start_recording(f"demo_session_{int(time.time())}")
         try: 
             while True:
                 _, address = server_socket.recvfrom(1024)
                 try:
-                    message = headset.get_current_data()
+                    message = headset.get_current_data(duration_second=1)
                     server_socket.sendto(message, address)
                     print(message[0:10])
                 except AttributeError as e:
                     print(f"Error getting current data: {e}")
                 headset.annotate_event("1 seconds mark")
-                time.sleep(1)
+                # time.sleep(1)
         finally:
             headset.stop_recording()
         
