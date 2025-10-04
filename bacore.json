@@ -1,0 +1,12 @@
+{
+    "logging_enabled": false,
+    "log_path": "bacore.log",
+    "log_level": 0,
+    "append_logs": true,
+    "timestamps_enabled": true,
+    "autoflush": true,
+    "log_buffer_size": 512,
+    "thread_ids_enabled": false,
+    "model_path": "",
+    "chunk_size": 25
+}
