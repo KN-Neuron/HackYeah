@@ -14,6 +14,7 @@ brainaccess = {git = "https://github.com/GrzegorzSzczepanek/brainaccess-python-a
 jupyter = "^1.0.0"
 prettytable = "^3.10.0"
 mne = "^1.10.1"
+scikit-learn = "^1.7.2"
 
 
 [tool.poetry.group.dev.dependencies]
