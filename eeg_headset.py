@@ -221,11 +221,18 @@ class EEGHeadset:
             return np.zeros((len(USED_DEVICE), int(duration_seconds * SAMPLING_RATE)))
             
         try:
-            # Get latest data from the acquisition object
-            # Note: This is a simplified example, actual implementation depends on BrainAccess API
-            samples = int(duration_seconds * SAMPLING_RATE)
-            data = self._eeg_acquisition.get_latest_samples(samples)
-            return data
+            # Use the get_mne method, which can return the last 'tim' seconds of data.
+            # We disable annotations here as they are not needed for a quick data sample.
+            mne_raw_latest = self._eeg_acquisition.get_mne(tim=duration_seconds, annotations=False)
+            
+            # The get_mne method returns an MNE Raw object. We need to extract the numpy array.
+            if mne_raw_latest:
+                data = mne_raw_latest.get_data()
+                return data
+            else:
+                # Handle the case where no data is available yet.
+                return np.zeros((len(USED_DEVICE), int(duration_seconds * SAMPLING_RATE)))
+
         except Exception as e:
             print(f"Error getting current data: {str(e)}")
             return np.zeros((len(USED_DEVICE), int(duration_seconds * SAMPLING_RATE)))

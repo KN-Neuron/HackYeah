@@ -11,7 +11,7 @@ BRAINACCESS_HALO_4_CHANNEL = {
 }
 
 # Standard connection port (modify if necessary)
-PORT = "/dev/rfcomm0"  # Default for Windows, use appropriate port for your OS
+PORT = "/dev/rfcomm1"  # Default for Windows, use appropriate port for your OS
                # On Linux/Mac this might be something like "/dev/ttyUSB0"
 
 # Sampling rate for the device (in Hz)

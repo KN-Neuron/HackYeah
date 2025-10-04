@@ -12,7 +12,7 @@ from eeg_headset import EEGHeadset
 from eeg_visualizer import EEGVisualizer
 
 
-def signal_handler(sig, frame):
+def signal_handler(sig, frame):  # sig and frame params required by signal.signal
     """Handle Ctrl+C to properly close the connection"""
     print("\nShutting down gracefully...")
     if headset._is_recording:
@@ -30,7 +30,9 @@ def main():
     parser.add_argument("--subject", type=str, default="test_subject", help="Subject identifier")
     parser.add_argument("--duration", type=int, default=60, help="Recording duration in seconds (default: 60)")
     parser.add_argument("--visualize", action="store_true", help="Enable real-time visualization")
+    parser.add_argument("--udp", action="store_true", help="Send recordings on specifired udp client")
     parser.add_argument("--no-record", action="store_true", help="Don't record data to disk")
+    
     
     args = parser.parse_args()
     
@@ -53,12 +55,32 @@ def main():
             print(f"Recording EEG data for subject '{args.subject}'")
             headset.start_recording(f"demo_session_{int(time.time())}")
             
-        # Start visualization - this will block until the window is closed
         visualizer.start_visualization()
         
-        # Clean up after visualization ends
         if headset._is_recording:
             headset.stop_recording()
+            
+    elif args.udp:
+        import socket
+        
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        server_socket.bind(('', 11111))
+        
+        headset.start_recording(f"demo_session_{int(time.time())}")
+        try: 
+            while True:
+                _, address = server_socket.recvfrom(1024)
+                try:
+                    message = headset.get_current_data()
+                    server_socket.sendto(message, address)
+                    print(message[0:10])
+                except AttributeError as e:
+                    print(f"Error getting current data: {e}")
+                headset.annotate_event("1 seconds mark")
+                time.sleep(1)
+        finally:
+            headset.stop_recording()
+        
     else:
         if not args.no_record:
             print(f"Recording EEG data for {args.duration} seconds...")
