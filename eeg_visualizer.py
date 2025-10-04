@@ -1,199 +1,269 @@
-import os
-from typing import Dict, List, Optional, Tuple
+"""
+Real-time visualization of BrainAccess Halo EEG data.
+"""
+
+import threading
+import time
+from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
-import mne
 import numpy as np
+from matplotlib.animation import FuncAnimation
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from scipy import signal
+
+from eeg_config import SAMPLING_RATE
+from eeg_headset import EEGHeadset
 
 
-def plot_raw_eeg(raw_data: mne.io.Raw, duration: float = 10.0, start: float = 0.0) -> Figure:
+class EEGVisualizer:
     """
-    Plot a segment of raw EEG data.
-    
-    Args:
-        raw_data: MNE Raw object containing EEG data
-        duration: Duration in seconds to plot
-        start: Start time in seconds
-        
-    Returns:
-        fig: Matplotlib figure
+    Real-time visualization for BrainAccess Halo 4-channel EEG data.
     """
-    # Create figure
-    fig = plt.figure(figsize=(12, 8))
     
-    # Plot data
-    raw_data.plot(duration=duration, start=start, scalings='auto', show=False, block=False)
-    
-    return fig
-
-def plot_spectrogram(raw_data: mne.io.Raw, fmin: float = 0, fmax: float = 50) -> Figure:
-    """
-    Plot a spectrogram of the EEG data.
-    
-    Args:
-        raw_data: MNE Raw object containing EEG data
-        fmin: Minimum frequency to display
-        fmax: Maximum frequency to display
+    def __init__(self, headset: EEGHeadset, window_size: float = 5.0):
+        """
+        Initialize the EEG visualizer.
         
-    Returns:
-        fig: Matplotlib figure
-    """
-    fig = plt.figure(figsize=(12, 8))
-    
-    # Create spectrograms for each channel
-    picks = mne.pick_types(raw_data.info, eeg=True)
-    channel_names = [raw_data.ch_names[i] for i in picks]
-    
-    for i, ch_idx in enumerate(picks):
-        plt.subplot(len(picks), 1, i + 1)
-        data, times = raw_data[ch_idx, :]
+        Args:
+            headset (EEGHeadset): EEG headset object to get data from.
+            window_size (float): Time window to display in seconds.
+        """
+        self.headset = headset
+        self.window_size = window_size
+        self.channels = headset.get_channel_names()
+        self.num_channels = len(self.channels)
+        self.sample_count = int(window_size * SAMPLING_RATE)
+        self.time_vector = np.linspace(-window_size, 0, self.sample_count)
         
-        # Calculate spectrogram
-        fs = raw_data.info['sfreq']
-        nperseg = min(int(fs * 2), data.shape[1])  # 2-second segments
+        # Data buffer for each channel
+        self.data_buffer = np.zeros((self.num_channels, self.sample_count))
         
-        f, t, Sxx = signal.spectrogram(data.flatten(), fs=fs, nperseg=nperseg)
+        # For frequency analysis
+        self.fft_size = 256
+        self.freq_vector = np.fft.rfftfreq(self.fft_size, 1.0 / SAMPLING_RATE)
+        self.freq_data = np.zeros((self.num_channels, len(self.freq_vector)))
         
-        # Plot spectrogram
-        plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='gouraud', cmap='viridis')
-        plt.ylim(fmin, fmax)
-        plt.ylabel(f'{channel_names[i]}\nFrequency (Hz)')
-        plt.colorbar(label='Power (dB)')
-    
-    plt.xlabel('Time (s)')
-    plt.tight_layout()
-    
-    return fig
-
-def plot_power_spectrum(raw_data: mne.io.Raw, fmin: float = 0, fmax: float = 50) -> Figure:
-    """
-    Plot the power spectrum of the EEG data.
-    
-    Args:
-        raw_data: MNE Raw object containing EEG data
-        fmin: Minimum frequency to display
-        fmax: Maximum frequency to display
+        # For signal quality
+        # self.signal_quality = [100] * self.num_channels
         
-    Returns:
-        fig: Matplotlib figure
-    """
-    fig = plt.figure(figsize=(10, 6))
+        self.is_running = False
+        self.animation = None
+        self.fig = None
     
-    # Calculate power spectrum for each channel
-    psds, freqs = mne.time_frequency.psd_welch(raw_data, fmin=fmin, fmax=fmax, 
-                                              n_fft=2048, n_overlap=1024)
-    
-    # Convert to dB
-    psds = 10 * np.log10(psds)
-    
-    # Plot each channel
-    for i in range(psds.shape[0]):
-        plt.plot(freqs, psds[i, :], label=raw_data.ch_names[i])
-    
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Power Spectral Density (dB)')
-    plt.title('EEG Power Spectrum')
-    plt.legend()
-    plt.grid(True)
-    
-    # Mark frequency bands
-    band_dict = {
-        'Delta': (1, 4),
-        'Theta': (4, 8),
-        'Alpha': (8, 13),
-        'Beta': (13, 30),
-        'Gamma': (30, 50)
-    }
-    
-    y_min, y_max = plt.ylim()
-    for band, (f_low, f_high) in band_dict.items():
-        if f_high >= fmin and f_low <= fmax:
-            plt.fill_betweenx([y_min, y_max], f_low, f_high, color='gray', alpha=0.2)
-            plt.text((f_low + f_high) / 2, y_max - 2, band, 
-                     horizontalalignment='center')
-    
-    plt.tight_layout()
-    return fig
-
-def plot_brain_map(raw_data: mne.io.Raw, freq_band: Tuple[float, float] = (8, 13)) -> Optional[Figure]:
-    """
-    Plot a topographic map of the brain for a specific frequency band.
-    
-    Args:
-        raw_data: MNE Raw object containing EEG data
-        freq_band: Tuple with (low, high) frequency range to plot
+    def start_visualization(self):
+        """
+        Start real-time visualization of EEG data.
+        """
+        if self.is_running:
+            print("Visualization is already running.")
+            return
+            
+        # Connect to headset if not already connected
+        if not self.headset._is_connected:
+            if not self.headset.connect():
+                print("Cannot start visualization: Failed to connect to headset.")
+                return
         
-    Returns:
-        fig: Matplotlib figure or None if too few channels
-    """
-    # Check if we have enough channels for a meaningful topographic map
-    # For BrainAccess Halo with 4 channels, this is not ideal but we'll do our best
-    if len(raw_data.ch_names) < 4:
-        print("Not enough channels for brain mapping")
-        return None
+        # Set up the figure and subplots
+        self.fig = plt.figure(figsize=(12, 8))
+        self.fig.suptitle('BrainAccess Halo 4-Channel EEG Visualization', fontsize=16)
+        
+        # Grid layout for plots
+        gs = self.fig.add_gridspec(3, 4)
+        
+        # Time-domain signals (top row)
+        self.time_axes = []
+        for i in range(self.num_channels):
+            ax = self.fig.add_subplot(gs[0, i])
+            ax.set_title(f"Channel {self.channels[i]}")
+            ax.set_ylim(-100, 100)  # μV range
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Amplitude (μV)")
+            ax.grid(True)
+            line, = ax.plot(self.time_vector, self.data_buffer[i], 'b-')
+            self.time_axes.append((ax, line))
+        
+        # Frequency domain (middle row)
+        self.freq_axes = []
+        for i in range(self.num_channels):
+            ax = self.fig.add_subplot(gs[1, i])
+            ax.set_title(f"{self.channels[i]} - Frequency Spectrum")
+            ax.set_xlim(0, 50)  # Hz range
+            ax.set_ylim(0, 20)
+            ax.set_xlabel("Frequency (Hz)")
+            ax.set_ylabel("Power")
+            ax.grid(True)
+            line, = ax.plot(self.freq_vector, self.freq_data[i], 'r-')
+            self.freq_axes.append((ax, line))
+        
+        # Brain activity heatmap (bottom left)
+        self.brain_ax = self.fig.add_subplot(gs[2, :2])
+        self.brain_ax.set_title("Brain Activity Heatmap")
+        self.brain_ax.axis('off')
+        
+        # Create a simple head outline
+        circle = plt.Circle((0.5, 0.5), 0.4, fill=False, edgecolor='black')
+        self.brain_ax.add_patch(circle)
+        
+        # Add channel positions
+        positions = {
+            "Fp1": (0.35, 0.8), "Fp2": (0.65, 0.8),
+            "O1": (0.35, 0.2),  "O2": (0.65, 0.2)
+        }
+        
+        self.brain_dots = {}
+        for ch_name, pos in positions.items():
+            dot = plt.Circle(pos, 0.05, fill=True, color='blue', alpha=0.7)
+            self.brain_ax.add_patch(dot)
+            self.brain_dots[ch_name] = dot
+            self.brain_ax.text(pos[0], pos[1] + 0.07, ch_name, ha='center')
+        
+        # Signal quality indicator (bottom right)
+        self.quality_ax = self.fig.add_subplot(gs[2, 2:])
+        self.quality_ax.set_title("Signal Quality")
+        self.quality_ax.set_xlim(0, 1)
+        self.quality_ax.set_ylim(0, self.num_channels)
+        self.quality_ax.set_yticks(np.arange(self.num_channels) + 0.5)
+        self.quality_ax.set_yticklabels(self.channels)
+        self.quality_ax.set_xlabel("Quality (%)")
+        
+        # self.quality_bars = self.quality_ax.barh(
+        #     np.arange(self.num_channels) + 0.5,
+        #     self.signal_quality,
+        #     height=0.8,
+        #     color=['green'] * self.num_channels
+        # )
+        
+        # Text for connection status
+        self.status_text = self.fig.text(
+            0.5, 0.02,
+            "Status: Connected",
+            ha='center',
+            bbox={'facecolor': 'green', 'alpha': 0.5, 'pad': 5}
+        )
+        
+        # Start animation
+        self.is_running = True
+        self.animation = FuncAnimation(
+            self.fig,
+            self._update_plot,
+            interval=100,  # Update every 100ms
+            blit=False
+        )
+        
+        # Start recording if not already
+        if not self.headset._is_recording:
+            self.headset.start_recording("visualization_session")
+        
+        plt.tight_layout()
+        plt.show(block=True)
     
-    try:
-        # Calculate power in the frequency band
-        psds, freqs = mne.time_frequency.psd_welch(raw_data, fmin=freq_band[0], 
-                                                  fmax=freq_band[1], n_fft=2048)
-        
-        # Average power across the specified frequency band
-        psds_mean = np.mean(psds, axis=1)
-        
-        # Create montage for plotting
-        montage = mne.channels.make_standard_montage('standard_1020')
-        raw_data.set_montage(montage)
-        
-        # Create figure
-        fig = plt.figure(figsize=(8, 6))
-        
-        # Plot topographic map
-        mne.viz.plot_topomap(psds_mean, raw_data.info, cmap='viridis', 
-                            show=False, contours=0)
-        
-        plt.title(f'Brain Activity: {freq_band[0]}-{freq_band[1]} Hz')
-        plt.colorbar(label='Power (µV²/Hz)')
-        
-        return fig
-    except Exception as e:
-        print(f"Error creating brain map: {str(e)}")
-        return None
-
-def analyze_frequency_bands(raw_data: mne.io.Raw) -> Dict[str, Dict[str, float]]:
-    """
-    Analyze the power in different frequency bands for each channel.
+    def stop_visualization(self):
+        """
+        Stop the visualization and clean up resources.
+        """
+        if not self.is_running:
+            return
+            
+        if self.animation is not None:
+            self.animation.event_source.stop()
+            self.animation = None
+            
+        if self.fig is not None:
+            plt.close(self.fig)
+            self.fig = None
+            
+        self.is_running = False
+        print("Visualization stopped.")
     
-    Args:
-        raw_data: MNE Raw object containing EEG data
+    def _update_plot(self, frame):
+        """
+        Update function for the animation.
         
-    Returns:
-        dict: Dictionary with channel names and band powers
-    """
-    # Define frequency bands
-    bands = {
-        'Delta': (1, 4),
-        'Theta': (4, 8),
-        'Alpha': (8, 13),
-        'Beta': (13, 30),
-        'Gamma': (30, 50)
-    }
-    
-    # Calculate PSD
-    psds, freqs = mne.time_frequency.psd_welch(raw_data, fmin=0.5, fmax=50, 
-                                              n_fft=2048, n_overlap=1024)
-    
-    # For each channel, calculate the average power in each frequency band
-    result = {}
-    for i, ch_name in enumerate(raw_data.ch_names):
-        ch_result = {}
-        for band_name, (fmin, fmax) in bands.items():
-            # Find frequencies in the band
-            idx_band = np.logical_and(freqs >= fmin, freqs <= fmax)
-            # Calculate mean power in the band
-            band_power = np.mean(psds[i, idx_band])
-            ch_result[band_name] = band_power
-        result[ch_name] = ch_result
-        
-    return result
+        Args:
+            frame: Frame number (not used)
+        """
+        try:
+            # Get latest EEG data
+            new_data = self.headset.get_current_data(0.1)  # Get 100ms of data
+            
+            if new_data.size == 0:
+                return
+                
+            # Roll the buffer and add new data
+            samples_to_add = new_data.shape[1]
+            self.data_buffer = np.roll(self.data_buffer, -samples_to_add, axis=1)
+            self.data_buffer[:, -samples_to_add:] = new_data
+            
+            # Update time domain plots
+            for i, (ax, line) in enumerate(self.time_axes):
+                line.set_ydata(self.data_buffer[i])
+            
+            # Calculate FFT for frequency domain
+            for i in range(self.num_channels):
+                # Use last FFT_SIZE samples for frequency analysis
+                channel_data = self.data_buffer[i, -self.fft_size:]
+                # Apply hamming window
+                windowed_data = channel_data * np.hamming(len(channel_data))
+                # Calculate FFT
+                fft_result = np.abs(np.fft.rfft(windowed_data)) / self.fft_size
+                # Square to get power
+                self.freq_data[i] = fft_result**2
+                
+                # Update frequency domain plot
+                self.freq_axes[i][1].set_ydata(self.freq_data[i])
+            
+            # Update brain activity heatmap
+            alpha_values = []
+            for i, ch_name in enumerate(self.channels):
+                # Calculate alpha activity (8-12 Hz) power
+                alpha_idx = np.logical_and(self.freq_vector >= 8, self.freq_vector <= 12)
+                alpha_power = np.mean(self.freq_data[i][alpha_idx])
+                alpha_values.append(alpha_power)
+                
+            # Normalize alpha values to color scale
+            if max(alpha_values) > 0:
+                norm_alpha = [val / max(alpha_values) for val in alpha_values]
+            else:
+                norm_alpha = [0] * len(alpha_values)
+                
+            # Update dot colors based on alpha activity
+            for i, ch_name in enumerate(self.channels):
+                # Map power to color: blue (low) to red (high)
+                r = min(1.0, norm_alpha[i] * 2)
+                b = max(0.0, 1.0 - norm_alpha[i] * 2)
+                self.brain_dots[ch_name].set_color((r, 0, b))
+                
+            # Update signal quality indicators
+            # In a real implementation, get actual signal quality
+            # Here we simulate quality changes
+            for i in range(self.num_channels):
+                # Simulate quality between 60-100%
+                quality = 60 + np.random.rand() * 40
+                # self.signal_quality[i] = quality
+                
+                # Update bar length and color
+                self.quality_bars[i].set_width(quality / 100)
+                
+                # Set color based on quality
+                if quality > 80:
+                    color = 'green'
+                elif quality > 60:
+                    color = 'yellow'
+                else:
+                    color = 'red'
+                self.quality_bars[i].set_color(color)
+                
+            # Update status text
+            if self.headset._is_connected:
+                self.status_text.set_text(f"Status: Connected - Recording Time: {int(time.time() - self.headset._recording_start_time)}s")
+                self.status_text.set_bbox(dict(facecolor='green', alpha=0.5, pad=5))
+            else:
+                self.status_text.set_text("Status: Disconnected")
+                self.status_text.set_bbox(dict(facecolor='red', alpha=0.5, pad=5))
+            
+        except Exception as e:
+            print(f"Error updating plot: {str(e)}")
+            
+        return []

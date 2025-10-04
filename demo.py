@@ -1,137 +1,95 @@
-import os
+"""
+Demo application for BrainAccess Halo 4-channel EEG headset.
+"""
+
+import argparse
+import signal
+import sys
 import time
 
-import matplotlib.pyplot as plt
-import numpy as np
-
-from eeg_config import DEFAULT_PORT
+from eeg_config import PORT
 from eeg_headset import EEGHeadset
-from eeg_visualizer import (analyze_frequency_bands, plot_power_spectrum,
-                            plot_raw_eeg, plot_spectrogram)
+from eeg_visualizer import EEGVisualizer
 
+
+def signal_handler(sig, frame):
+    """Handle Ctrl+C to properly close the connection"""
+    print("\nShutting down gracefully...")
+    if headset._is_recording:
+        headset.stop_recording()
+    if headset._is_connected:
+        headset.disconnect()
+    sys.exit(0)
 
 def main():
     print("BrainAccess Halo 4-Channel Demo")
     print("-------------------------------")
     
-    # Create participant ID based on timestamp
-    participant_id = f"participant_{int(time.time())}"
+    parser = argparse.ArgumentParser(description="BrainAccess Halo 4-channel EEG demo")
+    parser.add_argument("--port", type=str, default=PORT, help="Serial port for BrainAccess Halo")
+    parser.add_argument("--subject", type=str, default="test_subject", help="Subject identifier")
+    parser.add_argument("--duration", type=int, default=60, help="Recording duration in seconds (default: 60)")
+    parser.add_argument("--visualize", action="store_true", help="Enable real-time visualization")
+    parser.add_argument("--no-record", action="store_true", help="Don't record data to disk")
     
-    # Initialize headset
-    headset = EEGHeadset(participant_id)
+    args = parser.parse_args()
     
-    # Connect to headset
-    if not headset.connect(port=DEFAULT_PORT):
-        print("Failed to connect to headset. Exiting.")
+    # Register signal handler for Ctrl+C
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    global headset
+    headset = EEGHeadset(participant_id=args.subject)
+    
+    print(f"Connecting to BrainAccess Halo headset on port {args.port}...")
+    if not headset.connect():
+        print("Could not connect to the headset. Exiting.")
         return
     
-    # Show connection status
-    headset.show_connection_status()
-    
-    # Start recording
-    if not headset.start_recording(block_name="demo_recording"):
-        print("Failed to start recording. Exiting.")
-        headset.disconnect()
-        return
-    
-    # Start real-time visualization
-    print("Starting real-time EEG visualization...")
-    headset.visualize_real_time()
-    
-    # Record for a short time with annotations
-    print("\nRecording EEG data. Please sit still for 30 seconds.")
-    print("The demo will add annotations at specific times.")
-    
-    try:
-        # Record with annotations to demonstrate different states
-        time.sleep(5)
-        headset.annotate_event("Eyes Open")
-        print("Annotation: Eyes Open")
+    if args.visualize:
+        print("Starting real-time visualization...")
+        visualizer = EEGVisualizer(headset)
         
-        time.sleep(5)
-        headset.annotate_event("Eyes Closed")
-        print("Annotation: Eyes Closed (Alpha waves should increase)")
+        if not args.no_record:
+            print(f"Recording EEG data for subject '{args.subject}'")
+            headset.start_recording(f"demo_session_{int(time.time())}")
+            
+        # Start visualization - this will block until the window is closed
+        visualizer.start_visualization()
         
-        time.sleep(10)
-        headset.annotate_event("Mental Calculation")
-        print("Annotation: Mental Calculation (please perform 23 × 17 in your head)")
-        
-        time.sleep(5)
-        headset.annotate_event("Relaxation")
-        print("Annotation: Relaxation (please relax and breathe deeply)")
-        
-        time.sleep(5)
-        
-        # Display frequency spectrum during recording
-        print("\nShowing current frequency spectrum...")
-        headset.show_frequency_spectrum()
-        
-        # Continue recording
-        print("\nContinuing recording for a few more seconds...")
-        time.sleep(3)
-        
-    except KeyboardInterrupt:
-        print("\nRecording interrupted.")
-    
-    # Stop recording and save data
-    print("\nStopping recording...")
-    file_path = headset.stop_recording()
-    
-    if not file_path:
-        print("Failed to save recording. Exiting.")
-        headset.disconnect()
-        return
-    
-    print(f"Recording saved to: {file_path}")
-    
-    # Show connection status after recording
-    headset.show_connection_status()
-    
-    # Analyze the recorded data
-    print("\nAnalyzing recorded data...")
-    try:
-        # Load the saved data
-        import mne
-        raw_data = mne.io.read_raw_fif(file_path, preload=True)
-        
-        # Plot raw EEG
-        print("Plotting raw EEG data...")
-        fig_raw = plot_raw_eeg(raw_data, duration=30, start=0)
-        fig_raw.suptitle('Raw EEG Data')
-        plt.figure(fig_raw.number)
-        plt.savefig(os.path.join(os.path.dirname(file_path), 'raw_eeg_plot.png'))
-        plt.show()
-        
-        # Plot spectrogram
-        print("Generating spectrogram...")
-        fig_spec = plot_spectrogram(raw_data)
-        fig_spec.suptitle('EEG Spectrogram')
-        plt.figure(fig_spec.number)
-        plt.savefig(os.path.join(os.path.dirname(file_path), 'spectrogram.png'))
-        plt.show()
-        
-        # Plot power spectrum
-        print("Generating power spectrum...")
-        fig_psd = plot_power_spectrum(raw_data)
-        plt.figure(fig_psd.number)
-        plt.savefig(os.path.join(os.path.dirname(file_path), 'power_spectrum.png'))
-        plt.show()
-        
-        # Analyze frequency bands
-        print("\nFrequency band analysis:")
-        band_powers = analyze_frequency_bands(raw_data)
-        
-        # Print band power analysis
-        for channel, bands in band_powers.items():
-            print(f"\nChannel: {channel}")
-            for band, power in bands.items():
-                print(f"  {band}: {power:.2f} µV²/Hz")
-                
-    except Exception as e:
-        print(f"Error analyzing data: {str(e)}")
+        # Clean up after visualization ends
+        if headset._is_recording:
+            headset.stop_recording()
+    else:
+        if not args.no_record:
+            print(f"Recording EEG data for {args.duration} seconds...")
+            
+            # Start recording
+            headset.start_recording(f"demo_session_{int(time.time())}")
+            
+            try:
+                # Display a simple progress bar
+                for i in range(args.duration):
+                    progress = (i + 1) / args.duration
+                    bar_length = 30
+                    bar = '█' * int(bar_length * progress) + '-' * (bar_length - int(bar_length * progress))
+                    print(f"\rRecording: [{bar}] {int(progress * 100)}%", end='')
+                    
+                    # Add annotations at certain points
+                    if i == 10:
+                        headset.annotate_event("10 seconds mark")
+                    elif i == 30:
+                        headset.annotate_event("30 seconds mark")
+                        
+                    time.sleep(1)
+                    
+                print("\nRecording complete.")
+            finally:
+                # Stop recording and save data
+                headset.stop_recording()
+        else:
+            print("No action specified. Use --visualize or remove --no-record to perform an action.")
     
     # Disconnect from headset
-    print("\nDisconnecting from headset...")
     headset.disconnect()
     print("Demo completed.")
 
