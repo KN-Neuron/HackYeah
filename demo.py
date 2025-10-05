@@ -4,11 +4,8 @@ Demo application for BrainAccess Halo 4-channel EEG headset.
 
 import argparse
 import signal
-import socket
 import sys
 import time
-
-import numpy as np
 
 from eeg_config import PORT
 from eeg_headset import EEGHeadset
@@ -63,39 +60,44 @@ def main():
         if headset._is_recording:
             headset.stop_recording()
             
-    if args.udp:
-        # --- CORRECTED UDP SENDER LOGIC ---
-        # This script acts as the client, sending data out.
+    elif args.udp:
+        import socket
+        import numpy as np
         
+        # Create UDP client socket
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Define the receiver's (server's) address
-        RECEIVER_ADDRESS = ('127.0.0.1', 11111) 
+        # Define the receiver's address
+        RECEIVER_ADDRESS = ('127.0.0.1', 11111)
         
         print(f"Starting to stream EEG data via UDP to {RECEIVER_ADDRESS}...")
         
-        # Start headset recording to get live data
-        headset.start_recording(f"udp_stream_session_{int(time.time())}")
+        headset.start_recording(f"demo_session_{int(time.time())}")
         
-        try: 
+        try:
             while True:
                 try:
-                    # Get 1 second of data (SFREQ samples)
-                    # The argument name is duration_seconds
-                    data_chunk = headset.get_current_data(duration_seconds=1.0)
+                    # Get current data (1 second of data)
+                    data_chunk = headset.get_current_data(1)
                     
                     if data_chunk.size > 0:
+                        # IMPORTANT FIX: Ensure we always send exactly 4 channels
+                        # This handles the case where sometimes get_current_data returns 9 channels
+                        if data_chunk.shape[0] > 4:
+                            data_chunk = data_chunk[:4, :]  # Take only first 4 channels
+                        
+                        # Print shape for debugging
+                        print(f"Sending data shape: {data_chunk.shape}")
+                        
                         # Convert numpy array to bytes before sending
                         message_bytes = data_chunk.astype(np.float64).tobytes()
                         udp_socket.sendto(message_bytes, RECEIVER_ADDRESS)
                         print(f"Sent {len(message_bytes)} bytes of EEG data.")
-                        
                 except Exception as e:
                     print(f"Error getting or sending data: {e}")
-
-                # Wait for the next interval to send data every 1 second
-                time.sleep(1.0)
+                
+                # Wait a short time before next transmission
+                time.sleep(0.1)
         finally:
-            print("Stopping UDP stream.")
             headset.stop_recording()
             udp_socket.close()
         
