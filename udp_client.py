@@ -1,87 +1,62 @@
 import socket
-import time
-
 import mne
 import numpy as np
 
 # --- Configuration ---
 CHANNELS = 4
-SFREQ = 250  # Sampling frequency in Hz
+SFREQ = 250
 MEASUREMENTS_TO_PLOT = 50
-
-# !!! --- IMPORTANT: ADJUST THESE SETTINGS --- !!!
-
-# 1. SCALING FACTOR: If your data is in microvolts (uV), use 1e-6.
-# If it's in millivolts (mV), use 1e-3. If it's raw ADC values,
-# you will need to find the correct conversion factor from your hardware's documentation.
 DATA_SCALING_FACTOR = 1e-6 
-
-# 2. FILTER SETTINGS: A standard band-pass for EEG is 1 Hz to 40 Hz.
-# This removes slow DC drift and high-frequency muscle/electrical noise.
 LOW_FREQ = 1.0
 HIGH_FREQ = 40.0
 SAMPLES_PER_CHANNEL = 250
+
 # --- Network Configuration ---
 DTYPE = np.float64
 BYTES_PER_NUMBER = np.dtype(DTYPE).itemsize
 NUMBERS_PER_ARRAY = CHANNELS * SAMPLES_PER_CHANNEL
 REQUIRED_BYTES_FOR_ARRAY = NUMBERS_PER_ARRAY * BYTES_PER_NUMBER
 
+# --- SERVER ADDRESS ---
+# This is the address this script will listen on.
+SERVER_ADDRESS = ("127.0.0.1", 11111)
+
 # --- Live Code ---
 data_buffer = bytearray()
 collected_measurements = []
-is_running = True
 
+# --- CORRECTED SERVER LOGIC ---
+# Create one socket and bind it once.
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+server_socket.bind(SERVER_ADDRESS)
+
+print(f"UDP server listening on {SERVER_ADDRESS}")
 print(f"Collecting {MEASUREMENTS_TO_PLOT} measurements before plotting...")
 
-# This part is kept the same as your original script to collect data
-while is_running:
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.settimeout(1.0)
-    message = b'test'
-    # NOTE: Using a loopback address for demonstration purposes. 
-    # Replace with your device's actual address.
-    addr = ("127.0.0.1", 11111) 
-    
-    # This is a dummy server part for the script to run standalone.
-    # In your real use case, you would remove this and just have the client logic.
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_socket.bind(addr)
-    
-    client_socket.sendto(message, addr)
-    try:
-        # Dummy server sends back random data
-        dummy_data = np.random.randn(NUMBERS_PER_ARRAY).astype(DTYPE).tobytes()
-        server_socket.sendto(dummy_data, addr)
-
-        data, server = client_socket.recvfrom(32768)
+try:
+    while len(collected_measurements) < MEASUREMENTS_TO_PLOT:
+        # Wait here until a packet arrives.
+        data, address = server_socket.recvfrom(REQUIRED_BYTES_FOR_ARRAY + 1024)
+        
         data_buffer.extend(data)
         
         while len(data_buffer) >= REQUIRED_BYTES_FOR_ARRAY:
             chunk_to_process = data_buffer[:REQUIRED_BYTES_FOR_ARRAY]
+            
             numpy_array_1d = np.frombuffer(chunk_to_process, dtype=DTYPE)
-            reshaped_array = numpy_array_1d.reshape(CHANNELS, SAMPLES_PER_CHANNEL)
             
-            collected_measurements.append(reshaped_array)
-            print(f"Successfully processed array #{len(collected_measurements)}. Shape: {reshaped_array.shape}")
-            
+            if numpy_array_1d.size == NUMBERS_PER_ARRAY:
+                reshaped_array = numpy_array_1d.reshape(CHANNELS, SAMPLES_PER_CHANNEL)
+                collected_measurements.append(reshaped_array)
+                print(f"Successfully processed packet #{len(collected_measurements)} from {address}.")
+            else:
+                print(f"Warning: Received packet of incorrect size.")
+
             data_buffer = data_buffer[REQUIRED_BYTES_FOR_ARRAY:]
-
-            if len(collected_measurements) >= MEASUREMENTS_TO_PLOT:
-                is_running = False
-                break
-                
-    except socket.timeout:
-        print('REQUEST TIMED OUT')
-    finally:
-        client_socket.close()
-        server_socket.close()
-
-    if not is_running:
-        break
-
-print(f"\nCollected {len(collected_measurements)} measurements. Starting analysis...")
-
+finally:
+    server_socket.close()
+    print("Server socket closed.")
+    
 # --- MNE Analysis and Plotting ---
 
 # 1. Concatenate and Scale the Data
