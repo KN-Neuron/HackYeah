@@ -50,6 +50,7 @@ class TirednessClassifier:
             percentage = 100.0
         else:
             percentage = ((ratio - self.alert_threshold) /
+
                           (self.tired_threshold - self.alert_threshold)) * 100
 
         return (percentage, ratio)
