@@ -86,7 +86,7 @@ def main():
             print(f"Recording EEG data for {args.duration} seconds...")
             
             # Start recording
-            headset.start_recording(f"demo_session_{int(time.time())}")
+            headset.start_recording(f"demo_v2_session_{int(time.time())}")
             
             try:
                 # Display a simple progress bar
