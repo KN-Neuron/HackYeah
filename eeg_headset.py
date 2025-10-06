@@ -1,7 +1,3 @@
-"""
-EEG Headset module for BrainAccess Halo 4-channel device.
-"""
-
 import os
 import time
 from typing import Any, Dict, List, Optional
@@ -121,14 +117,12 @@ class EEGHeadset:
             return True
             
         try:
-            # Start EEG acquisition
             print("Starting EEG data acquisition...")
             self._eeg_acquisition.start_acquisition()
             self._is_recording = True
             self._session_name = session_name
             self._recording_start_time = time.time()
             
-            # Create annotation for session start
             self.annotate_event(f"Session started: {session_name}")
             
             print(f"Recording started for session: {session_name}")
@@ -149,14 +143,11 @@ class EEGHeadset:
             return False
             
         try:
-            # Create annotation for session end
             self.annotate_event("Session ended")
             
-            # Get the MNE raw object with recorded data
             print("Processing recorded data...")
             self._eeg_acquisition.get_mne()
             
-            # Save data to file
             file_path = os.path.join(
                 self._save_dir_path, 
                 f"{self._participant_id}_{self._session_name}_{int(self._recording_start_time)}_raw.fif"
@@ -164,7 +155,6 @@ class EEGHeadset:
             print(f"Saving EEG data to {file_path}")
             self._eeg_acquisition.data.save(file_path)
             
-            # Stop acquisition
             self._eeg_acquisition.stop_acquisition()
             self._eeg_manager.clear_annotations()
             self._is_recording = False
@@ -221,16 +211,12 @@ class EEGHeadset:
             return np.zeros((len(USED_DEVICE), int(duration_seconds * SAMPLING_RATE)))
             
         try:
-            # Use the get_mne method, which can return the last 'tim' seconds of data.
-            # We disable annotations here as they are not needed for a quick data sample.
             mne_raw_latest = self._eeg_acquisition.get_mne(tim=duration_seconds, annotations=False)
             
-            # The get_mne method returns an MNE Raw object. We need to extract the numpy array.
             if mne_raw_latest:
                 data = mne_raw_latest.get_data()
                 return data
             else:
-                # Handle the case where no data is available yet.
                 return np.zeros((len(USED_DEVICE), int(duration_seconds * SAMPLING_RATE)))
 
         except Exception as e:

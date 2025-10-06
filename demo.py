@@ -12,7 +12,7 @@ from eeg_headset import EEGHeadset
 from eeg_visualizer import EEGVisualizer
 
 
-def signal_handler(sig, frame):  # sig and frame params required by signal.signal
+def signal_handler(sig, frame):
     """Handle Ctrl+C to properly close the connection"""
     print("\nShutting down gracefully...")
     if headset._is_recording:
@@ -33,10 +33,8 @@ def main():
     parser.add_argument("--udp", action="store_true", help="Send recordings on specifired udp client")
     parser.add_argument("--no-record", action="store_true", help="Don't record data to disk")
     
-    
     args = parser.parse_args()
     
-    # Register signal handler for Ctrl+C
     signal.signal(signal.SIGINT, signal_handler)
     
     global headset
@@ -71,13 +69,12 @@ def main():
             while True:
                 _, address = server_socket.recvfrom(1024)
                 try:
-                    message = headset.get_current_data(duration_second=1)
+                    message = headset.get_current_data(duration_seconds=1)
                     server_socket.sendto(message, address)
                     print(message[0:10])
                 except AttributeError as e:
                     print(f"Error getting current data: {e}")
                 headset.annotate_event("1 seconds mark")
-                # time.sleep(1)
         finally:
             headset.stop_recording()
         
@@ -85,18 +82,15 @@ def main():
         if not args.no_record:
             print(f"Recording EEG data for {args.duration} seconds...")
             
-            # Start recording
             headset.start_recording(f"demo_session_{int(time.time())}")
             
             try:
-                # Display a simple progress bar
                 for i in range(args.duration):
                     progress = (i + 1) / args.duration
                     bar_length = 30
                     bar = '█' * int(bar_length * progress) + '-' * (bar_length - int(bar_length * progress))
                     print(f"\rRecording: [{bar}] {int(progress * 100)}%", end='')
                     
-                    # Add annotations at certain points
                     if i == 10:
                         headset.annotate_event("10 seconds mark")
                     elif i == 30:
@@ -106,12 +100,10 @@ def main():
                     
                 print("\nRecording complete.")
             finally:
-                # Stop recording and save data
                 headset.stop_recording()
         else:
             print("No action specified. Use --visualize or remove --no-record to perform an action.")
     
-    # Disconnect from headset
     headset.disconnect()
     print("Demo completed.")
 
