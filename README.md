@@ -8,3 +8,11 @@ poetry install
 poetry env use python3.11
 poetry install
 ```
+
+Example:
+<img width="590" height="1280" alt="image" src="https://github.com/user-attachments/assets/cfda60ee-6b21-4b49-a4d7-31fff2fb99bf" />
+
+
+
+example reading of EEG:
+<img width="767" height="515" alt="image" src="https://github.com/user-attachments/assets/c1efaa02-069b-4c0b-ae33-ba0fb7e3cb75" />
