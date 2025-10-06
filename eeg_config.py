@@ -1,11 +1,11 @@
 BRAINACCESS_HALO_4_CHANNEL = {
-    "left_frontal": "Fp1",
-    "right_frontal": "Fp2",
-    "left_occipital": "O1", 
-    "left_occipital": "O2", 
+    0: "Fp1",
+    1: "Fp2",
+    2: "O1", 
+    3: "O2", 
 }
 
-PORT = "/dev/rfcomm1"  
+PORT = "/dev/rfcomm0"  
 
 SAMPLING_RATE = 250
 
