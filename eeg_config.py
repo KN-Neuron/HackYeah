@@ -1,9 +1,8 @@
-
 BRAINACCESS_HALO_4_CHANNEL = {
-    0: "Fp1",  # Left frontal
-    1: "Fp2",  # Right frontal
-    2: "O1",   # Left occipital
-    3: "O2",   # Right occipital
+    "left_frontal": "Fp1",
+    "right_frontal": "Fp2",
+    "left_occipital": "O1", 
+    "left_occipital": "O2", 
 }
 
 PORT = "/dev/rfcomm1"  
