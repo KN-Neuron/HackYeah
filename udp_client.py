@@ -1,114 +1,124 @@
 import socket
 import time
-
 import mne
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
+from collections import deque
 
 CHANNELS = 4
-SFREQ = 250 
-MEASUREMENTS_TO_PLOT = 50
-
-DATA_SCALING_FACTOR = 1e-6 
-
+SFREQ = 250
+DATA_SCALING_FACTOR = 1e-6
 LOW_FREQ = 1.0
 HIGH_FREQ = 40.0
+
 SAMPLES_PER_CHANNEL = 250
 DTYPE = np.float64
 BYTES_PER_NUMBER = np.dtype(DTYPE).itemsize
 NUMBERS_PER_ARRAY = CHANNELS * SAMPLES_PER_CHANNEL
 REQUIRED_BYTES_FOR_ARRAY = NUMBERS_PER_ARRAY * BYTES_PER_NUMBER
 
-data_buffer = bytearray()
-collected_measurements = []
-is_running = True
+PLOT_WINDOW_SECONDS = 5
+SAMPLES_TO_PLOT = PLOT_WINDOW_SECONDS * SFREQ
+collected_measurements = deque(maxlen=int(SAMPLES_TO_PLOT / SAMPLES_PER_CHANNEL) + 2)
 
-print(f"Collecting {MEASUREMENTS_TO_PLOT} measurements before plotting...")
-
-while is_running:
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.settimeout(1.0)
-    message = b'test'
-    # NOTE: Using a loopback address for demonstration purposes. 
-    # Replace with your device's actual address.
-    addr = ("127.0.0.1", 11111) 
-    
-    # This is a dummy server part for the script to run standalone.
-    # In your real use case, you would remove this and just have the client logic.
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_socket.bind(addr)
-    
-    client_socket.sendto(message, addr)
-    try:
-        dummy_data = np.random.randn(NUMBERS_PER_ARRAY).astype(DTYPE).tobytes()
-        server_socket.sendto(dummy_data, addr)
-
-        data, server = client_socket.recvfrom(32768)
-        data_buffer.extend(data)
-        
-        while len(data_buffer) >= REQUIRED_BYTES_FOR_ARRAY:
-            chunk_to_process = data_buffer[:REQUIRED_BYTES_FOR_ARRAY]
-            numpy_array_1d = np.frombuffer(chunk_to_process, dtype=DTYPE)
-            reshaped_array = numpy_array_1d.reshape(CHANNELS, SAMPLES_PER_CHANNEL)
-            
-            collected_measurements.append(reshaped_array)
-            print(f"Successfully processed array #{len(collected_measurements)}. Shape: {reshaped_array.shape}")
-            
-            data_buffer = data_buffer[REQUIRED_BYTES_FOR_ARRAY:]
-
-            if len(collected_measurements) >= MEASUREMENTS_TO_PLOT:
-                is_running = False
-                break
-                
-    except socket.timeout:
-        print('REQUEST TIMED OUT')
-    finally:
-        client_socket.close()
-        server_socket.close()
-
-    if not is_running:
-        break
-
-print(f"\nCollected {len(collected_measurements)} measurements. Starting analysis...")
-
-full_data = np.concatenate(collected_measurements, axis=1) * DATA_SCALING_FACTOR
-print(f"Final data shape for plotting: {full_data.shape}")
+UDP_IP = "192.168.43.22"
+UDP_PORT = 11111
+addr = (UDP_IP, UDP_PORT)
 
 ch_names = [f'CH{i+1}' for i in range(CHANNELS)]
 ch_types = ['eeg'] * CHANNELS
 info = mne.create_info(ch_names=ch_names, sfreq=SFREQ, ch_types=ch_types)
 
-raw = mne.io.RawArray(full_data, info)
-
 montage = mne.channels.make_standard_montage('standard_1020')
-channel_map = {f'CH{i+1}': name for i, name in enumerate(montage.ch_names[:CHANNELS])}
-raw.rename_channels(channel_map)
-raw.set_montage(montage)
-
-raw.filter(l_freq=LOW_FREQ, h_freq=HIGH_FREQ, fir_design='firwin')
-print(f"Data filtered between {LOW_FREQ} and {HIGH_FREQ} Hz.")
-
-print("\nDisplaying filtered raw signal. Close the plot to continue.")
-raw.plot(block=True, title="Filtered Live Stream Data", scalings=dict(eeg=20e-6)) 
-
-print("\nDisplaying Power Spectral Density (PSD). Close the plot to continue.")
-raw.compute_psd().plot(spatial_colors=True, average=False, picks='eeg')
-
-print("\nDisplaying sensor locations. Close the plot to continue.")
-raw.plot_sensors(ch_type='eeg', show_names=True)
+mapped_ch_names = montage.ch_names[:CHANNELS]
+channel_map = {f'CH{i+1}': mapped_ch_names[i] for i in range(CHANNELS)}
 
 
-print("\nDisplaying topographical PSD map. Close the plot to continue.")
-raw.compute_psd().plot_topo()
+plt.ion()
+fig, axes = plt.subplots(CHANNELS, 1, figsize=(12, 8), sharex=True)
+fig.suptitle('Live EEG Data Feed', fontsize=16)
+is_paused = False
+
+class ButtonHandler:
+    def __init__(self):
+        self.is_paused = False
+
+    def toggle_pause(self, event):
+        self.is_paused = not self.is_paused
+        print(f"Plotting {'Paused' if self.is_paused else 'Resumed'}")
+
+button_handler = ButtonHandler()
+
+data_buffer = bytearray()
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+client_socket.settimeout(1.0)
+
+print("Starting real-time EEG data plotting...")
+print("Press the 'Pause/Resume' button on the plot to freeze the feed.")
+print("Press Ctrl+C in the terminal to stop the script.")
+
+ax_button = fig.add_axes([0.8, 0.01, 0.15, 0.05])
+btn_pause = Button(ax_button, 'Pause/Resume')
+btn_pause.on_clicked(button_handler.toggle_pause)
 
 
-print("\nPerforming ICA to find artifacts. This may take a moment...")
-ica = mne.preprocessing.ICA(n_components=CHANNELS, random_state=97, max_iter='auto')
-ica.fit(raw)
+try:
+    while True:
+    
+        time.sleep(1)
+        if not button_handler.is_paused:
+            client_socket.sendto(b"message", addr)
+            try:
+                data, server = client_socket.recvfrom(8192)
+                data_buffer.extend(data)
 
-print("Displaying ICA sources. Look for components that resemble blinks or heartbeats.")
-ica.plot_sources(raw, block=True)
+                while len(data_buffer) >= REQUIRED_BYTES_FOR_ARRAY:
+                    chunk = data_buffer[:REQUIRED_BYTES_FOR_ARRAY]
+                    data_buffer = data_buffer[REQUIRED_BYTES_FOR_ARRAY:]
 
-print("Displaying ICA properties. Close the plot to finish the script.")
-ica.plot_properties(raw, picks=[0, 1, 2, 3], block=True)
+                    reshaped_array = np.frombuffer(chunk, dtype=DTYPE).reshape(CHANNELS, SAMPLES_PER_CHANNEL)
+                    collected_measurements.append(reshaped_array)
 
-print("\nScript finished.")
+            except socket.timeout:
+                print('REQUEST TIMED OUT')
+                continue
+
+        
+            if collected_measurements:
+                full_data = np.concatenate(list(collected_measurements), axis=1) * DATA_SCALING_FACTOR
+                
+                if full_data.shape[1] > SAMPLES_TO_PLOT:
+                    full_data = full_data[:, -SAMPLES_TO_PLOT:]
+
+                raw = mne.io.RawArray(full_data, info, verbose=False)
+                raw.rename_channels(channel_map)
+                raw.set_montage(montage, on_missing='warn')
+                raw.filter(l_freq=LOW_FREQ, h_freq=HIGH_FREQ, fir_design='firwin', verbose=False)
+                
+                plot_data, times = raw.get_data(return_times=True)
+
+                for i, ax in enumerate(axes):
+                    ax.clear()
+                    ax.plot(times, plot_data[i])
+                    ax.set_ylabel(f"{raw.ch_names[i]}\n(uV)")
+                
+                    min_val, max_val = np.min(plot_data[i]), np.max(plot_data[i])
+                    padding = (max_val - min_val) * 0.1
+                    ax.set_ylim(min_val - padding, max_val + padding)
+                    ax.grid(True)
+
+                axes[-1].set_xlabel("Time (s)")
+                fig.tight_layout(rect=[0, 0.05, 1, 0.96])
+
+    
+        plt.pause(0.1)
+
+
+except KeyboardInterrupt:
+    print("\nScript interrupted by user. Closing socket and exiting.")
+finally:
+    client_socket.close()
+    plt.ioff()
+    plt.show()
+    print("Socket closed. Script finished.")
