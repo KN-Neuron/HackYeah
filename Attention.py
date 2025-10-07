@@ -1,9 +1,9 @@
-
 class AttentionClassifier:
     """
     Placeholder for an attention classifier.
     A real implementation might use a ratio like Beta / (Alpha + Theta).
     """
+
     def __init__(self, sfreq, channels=None):
         self.sfreq = sfreq
         self.channels = channels
@@ -14,5 +14,5 @@ class AttentionClassifier:
         """
         # In a real implementation, you would perform frequency analysis here.
         # For now, it returns a dummy value.
-        placeholder_percentage = 50.0 
+        placeholder_percentage = 50.0
         return (placeholder_percentage, 0.0)

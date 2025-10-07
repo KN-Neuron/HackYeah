@@ -20,64 +20,81 @@ def signal_handler(sig, frame):
         headset.disconnect()
     sys.exit(0)
 
+
 def main():
     print("BrainAccess Halo 4-Channel Demo")
     print("-------------------------------")
-    
+
     parser = argparse.ArgumentParser(description="BrainAccess Halo 4-channel EEG demo")
-    parser.add_argument("--port", type=str, default=PORT, help="Serial port for BrainAccess Halo")
-    parser.add_argument("--subject", type=str, default="test_subject", help="Subject identifier")
-    parser.add_argument("--duration", type=int, default=60, help="Recording duration in seconds (default: 60)")
-    parser.add_argument("--visualize", action="store_true", help="Enable real-time visualization")
-    parser.add_argument("--udp", action="store_true", help="Send recordings on specifired udp client")
-    parser.add_argument("--no-record", action="store_true", help="Don't record data to disk")
-    
+    parser.add_argument(
+        "--port", type=str, default=PORT, help="Serial port for BrainAccess Halo"
+    )
+    parser.add_argument(
+        "--subject", type=str, default="test_subject", help="Subject identifier"
+    )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=60,
+        help="Recording duration in seconds (default: 60)",
+    )
+    parser.add_argument(
+        "--visualize", action="store_true", help="Enable real-time visualization"
+    )
+    parser.add_argument(
+        "--udp", action="store_true", help="Send recordings on specifired udp client"
+    )
+    parser.add_argument(
+        "--no-record", action="store_true", help="Don't record data to disk"
+    )
+
     args = parser.parse_args()
-    
+
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     global headset
     headset = EEGHeadset(participant_id=args.subject)
-    
+
     print(f"Connecting to BrainAccess Halo headset on port {args.port}...")
     if not headset.connect():
         print("Could not connect to the headset. Exiting.")
         return
-    
+
     if args.visualize:
         print("Starting real-time visualization...")
         visualizer = EEGVisualizer(headset)
-        
+
         if not args.no_record:
             print(f"Recording EEG data for subject '{args.subject}'")
             headset.start_recording(f"demo_session_{int(time.time())}")
-            
+
         visualizer.start_visualization()
-        
+
         if headset._is_recording:
             headset.stop_recording()
-            
+
     elif args.udp:
-        SERVER_ADDRESS = ('192.168.43.22', 11111)
+        # SERVER_ADDRESS = ("10.246.165.22", 11111)
+        SERVER_ADDRESS = ("192.168.43.22", 11111)
         udp_server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_server_socket.bind(SERVER_ADDRESS)
-        
+
         print(f"Starting to stream EEG data via UDP from {SERVER_ADDRESS}...")
-        
-        headset.start_recording(f"demo_session_{time.strftime('%Y_%m_%d_%H_%M_%S')}")
-        
+
+        headset.start_recording(f"demo_session_{time.strftime('%Y_%m_%d - %H:%M:%S')}")
+
         try:
             while True:
                 _, client_address = udp_server_socket.recvfrom(1024)
                 try:
                     data_chunk = headset.get_current_data(1)
-                    
+
                     if data_chunk.size > 0:
                         if data_chunk.shape[0] > 4:
-                            data_chunk = data_chunk[:4, :] 
+                            data_chunk = data_chunk[:4, :]
 
                         print(f"Sending data shape: {data_chunk.shape}")
-                        
+
                         message_bytes = data_chunk.astype(np.float64).tobytes()
                         udp_server_socket.sendto(message_bytes, client_address)
 
@@ -85,41 +102,45 @@ def main():
 
                 except Exception as e:
                     print(f"Error getting or sending data: {e}")
-                
-                time.sleep(0.1)
+
         finally:
             headset.stop_recording()
             udp_server_socket.close()
-        
+
     else:
         if not args.no_record:
             print(f"Recording EEG data for {args.duration} seconds...")
-            
+
             # Start recording
             headset.start_recording(f"demo_v2_session_{int(time.time())}")
-            
+
             try:
                 for i in range(args.duration):
                     progress = (i + 1) / args.duration
                     bar_length = 30
-                    bar = '█' * int(bar_length * progress) + '-' * (bar_length - int(bar_length * progress))
-                    print(f"\rRecording: [{bar}] {int(progress * 100)}%", end='')
-                    
+                    bar = "█" * int(bar_length * progress) + "-" * (
+                        bar_length - int(bar_length * progress)
+                    )
+                    print(f"\rRecording: [{bar}] {int(progress * 100)}%", end="")
+
                     if i == 10:
                         headset.annotate_event("10 seconds mark")
                     elif i == 30:
                         headset.annotate_event("30 seconds mark")
-                        
+
                     time.sleep(1)
-                    
+
                 print("\nRecording complete.")
             finally:
                 headset.stop_recording()
         else:
-            print("No action specified. Use --visualize or remove --no-record to perform an action.")
-    
+            print(
+                "No action specified. Use --visualize or remove --no-record to perform an action."
+            )
+
     headset.disconnect()
     print("Demo completed.")
+
 
 if __name__ == "__main__":
     main()
