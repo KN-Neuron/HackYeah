@@ -1,4 +1,6 @@
 import socket
+import warnings
+from scipy.signal import find_peaks
 import time
 import mne
 import numpy as np
@@ -29,6 +31,10 @@ addr = (UDP_IP, UDP_PORT)
 ch_names = [f'CH{i+1}' for i in range(CHANNELS)]
 ch_types = ['eeg'] * CHANNELS
 info = mne.create_info(ch_names=ch_names, sfreq=SFREQ, ch_types=ch_types)
+
+warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+mne.set_log_level('warning')
+
 
 montage = mne.channels.make_standard_montage('standard_1020')
 mapped_ch_names = montage.ch_names[:CHANNELS]
@@ -63,9 +69,13 @@ btn_pause = Button(ax_button, 'Pause/Resume')
 btn_pause.on_clicked(button_handler.toggle_pause)
 
 
+FRONTAL_CHANNEL_INDEX = 0
+BLINK_THRESHOLD = 30e-6  
+
 try:
+    previous_segment = None
     while True:
-    
+
         time.sleep(1)
         if not button_handler.is_paused:
             client_socket.sendto(b"message", addr)
@@ -84,25 +94,33 @@ try:
                 print('REQUEST TIMED OUT')
                 continue
 
-        
+
             if collected_measurements:
                 full_data = np.concatenate(list(collected_measurements), axis=1) * DATA_SCALING_FACTOR
-                
+
                 if full_data.shape[1] > SAMPLES_TO_PLOT:
                     full_data = full_data[:, -SAMPLES_TO_PLOT:]
+
+
 
                 raw = mne.io.RawArray(full_data, info, verbose=False)
                 raw.rename_channels(channel_map)
                 raw.set_montage(montage, on_missing='warn')
                 raw.filter(l_freq=LOW_FREQ, h_freq=HIGH_FREQ, fir_design='firwin', verbose=False)
-                
+
+                frontal_data = raw.get_data(picks=[FRONTAL_CHANNEL_INDEX])[0]
+
+                if np.max(np.abs(frontal_data[-SAMPLES_PER_CHANNEL:])) > BLINK_THRESHOLD:
+                    print("\n\n\n\n\n blink \n\n\n\n\n")
+
+
                 plot_data, times = raw.get_data(return_times=True)
 
                 for i, ax in enumerate(axes):
                     ax.clear()
                     ax.plot(times, plot_data[i])
                     ax.set_ylabel(f"{raw.ch_names[i]}\n(uV)")
-                
+
                     min_val, max_val = np.min(plot_data[i]), np.max(plot_data[i])
                     padding = (max_val - min_val) * 0.1
                     ax.set_ylim(min_val - padding, max_val + padding)
@@ -111,7 +129,7 @@ try:
                 axes[-1].set_xlabel("Time (s)")
                 fig.tight_layout(rect=[0, 0.05, 1, 0.96])
 
-    
+
         plt.pause(0.1)
 
 
